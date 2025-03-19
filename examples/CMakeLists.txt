@@ -149,6 +149,7 @@ add_sdl_example_executable(demo-snake SOURCES demo/01-snake/snake.c)
 add_sdl_example_executable(demo-woodeneye-008 SOURCES demo/02-woodeneye-008/woodeneye-008.c)
 add_sdl_example_executable(demo-infinite-monkeys SOURCES demo/03-infinite-monkeys/infinite-monkeys.c)
 add_sdl_example_executable(demo-bytepusher SOURCES demo/04-bytepusher/bytepusher.c)
+add_sdl_example_executable(demo-screen SOURCES demo/05-screen/screen.c)
 
 # When you add an example, remember to add the Visual Studio project as well:
 # - Add a new example in examples/
