@@ -29,7 +29,10 @@
 #ifdef SDL_JOYSTICK_HIDAPI_8BITDO
 
 // Define this if you want to log all packets from the controller
-// #define DEBUG_8BITDO_PROTOCOL
+#if 0
+#define DEBUG_8BITDO_PROTOCOL
+#endif
+
 enum
 {
     SDL_GAMEPAD_BUTTON_8BITDO_L4 = 11,
@@ -46,6 +49,7 @@ enum
 typedef struct
 {
     bool sensors_supported;
+    bool sensors_enabled;
     bool touchpad_01_supported;
     bool touchpad_02_supported;
     bool rumble_supported;
@@ -105,9 +109,7 @@ static void HIDAPI_Driver8BitDo_UnregisterHints(SDL_HintCallback callback, void 
 
 static bool HIDAPI_Driver8BitDo_IsEnabled(void)
 {
-    // We'll default this off for now, since we don't have a way to tell whether the controller is running firmware v1.03 and don't have a fallback for controllers running firmware v1.02 (the out-of-box firmware)
     return SDL_GetHintBoolean(SDL_HINT_JOYSTICK_HIDAPI_8BITDO, SDL_GetHintBoolean(SDL_HINT_JOYSTICK_HIDAPI, SDL_HIDAPI_DEFAULT));
-    //return SDL_GetHintBoolean(SDL_HINT_JOYSTICK_HIDAPI_8BITDO, false);
 }
 
 static bool HIDAPI_Driver8BitDo_IsSupportedDevice(SDL_HIDAPI_Device *device, const char *name, SDL_GamepadType type, Uint16 vendor_id, Uint16 product_id, Uint16 version, int interface_number, int interface_class, int interface_subclass, int interface_protocol)
@@ -117,28 +119,21 @@ static bool HIDAPI_Driver8BitDo_IsSupportedDevice(SDL_HIDAPI_Device *device, con
 
 static bool HIDAPI_Driver8BitDo_InitDevice(SDL_HIDAPI_Device *device)
 {
-    SDL_Driver8BitDo_Context *ctx;
-    Uint8 data[USB_PACKET_LENGTH];
-    int size;
-    ctx = (SDL_Driver8BitDo_Context *)SDL_calloc(1, sizeof(*ctx));
+    SDL_Driver8BitDo_Context *ctx = (SDL_Driver8BitDo_Context *)SDL_calloc(1, sizeof(*ctx));
     if (!ctx) {
         return false;
     }
-
     device->context = ctx;
 
     if (device->product_id == USB_PRODUCT_8BITDO_ULTIMATE2_WIRELESS) {
-        ctx->sensors_supported = true;
-        ctx->rumble_supported = true;
-        ctx->rumble_type = 0;
-        ctx->powerstate_supported = true;
-
-        size = SDL_hid_read_timeout(device->dev, data, sizeof(data), 80);
-        //ULTIMATE2_WIRELESS V1.02
-        if (size<30) {
-            ctx->powerstate_supported = false;
-            ctx->rumble_supported = false;
-            ctx->sensors_supported = false;
+        // The Ultimate 2 Wireless v1.02 firmware has < 30 byte reports, v1.03 firmware has 34 byte reports
+        const int ULTIMATE2_WIRELESS_V103_REPORT_SIZE = 34;
+        Uint8 data[USB_PACKET_LENGTH];
+        int size = SDL_hid_read_timeout(device->dev, data, sizeof(data), 80);
+        if (size >= ULTIMATE2_WIRELESS_V103_REPORT_SIZE) {
+            ctx->sensors_supported = true;
+            ctx->rumble_supported = true;
+            ctx->powerstate_supported = true;
         }
     }
 
@@ -171,7 +166,7 @@ static bool HIDAPI_Driver8BitDo_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joys
         SDL_PrivateJoystickAddSensor(joystick, SDL_SENSOR_GYRO, 250.0f);
         SDL_PrivateJoystickAddSensor(joystick, SDL_SENSOR_ACCEL, 250.0f);
 
-        
+
         ctx->accelScale = SDL_STANDARD_GRAVITY / ABITDO_ACCEL_SCALE;
         ctx->gyroScale = SDL_PI_F / 180.0f / ABITDO_GYRO_SCALE;
     }
@@ -226,11 +221,12 @@ static bool HIDAPI_Driver8BitDo_SendJoystickEffect(SDL_HIDAPI_Device *device, SD
 
 static bool HIDAPI_Driver8BitDo_SetJoystickSensorsEnabled(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, bool enabled)
 {
-   SDL_Driver8BitDo_Context *ctx = (SDL_Driver8BitDo_Context *)device->context;
-   if (ctx->sensors_supported) {
-       return true;
-   }
-   return SDL_Unsupported();
+    SDL_Driver8BitDo_Context *ctx = (SDL_Driver8BitDo_Context *)device->context;
+    if (ctx->sensors_supported) {
+        ctx->sensors_enabled = enabled;
+        return true;
+    }
+    return SDL_Unsupported();
 }
 static void HIDAPI_Driver8BitDo_HandleStatePacket(SDL_Joystick *joystick, SDL_Driver8BitDo_Context *ctx, Uint8 *data, int size)
 {
@@ -276,7 +272,7 @@ static void HIDAPI_Driver8BitDo_HandleStatePacket(SDL_Joystick *joystick, SDL_Dr
         SDL_SendJoystickHat(timestamp, joystick, 0, hat);
     }
 
-    
+
     if (ctx->last_state[8] != data[8]) {
         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_SOUTH, ((data[8] & 0x01) != 0));
         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_EAST, ((data[8] & 0x02) != 0));
@@ -356,7 +352,7 @@ static void HIDAPI_Driver8BitDo_HandleStatePacket(SDL_Joystick *joystick, SDL_Dr
     }
 
 
-    if (ctx->sensors_supported) {
+    if (ctx->sensors_enabled) {
         Uint64 sensor_timestamp;
         float values[3];
         ABITDO_SENSORS *sensors = (ABITDO_SENSORS *)&data[15];
@@ -390,6 +386,9 @@ static bool HIDAPI_Driver8BitDo_UpdateDevice(SDL_HIDAPI_Device *device)
     }
 
     while ((size = SDL_hid_read_timeout(device->dev, data, sizeof(data), 0)) > 0) {
+#ifdef DEBUG_8BITDO_PROTOCOL
+        HIDAPI_DumpPacket("8BitDo packet: size = %d", data, size);
+#endif
         if (!joystick) {
             continue;
         }
@@ -434,6 +433,6 @@ SDL_HIDAPI_DeviceDriver SDL_HIDAPI_Driver8BitDo = {
     HIDAPI_Driver8BitDo_FreeDevice,
 };
 
-#endif // SDL_JOYSTICK_HIDAPI_8BitDo
+#endif // SDL_JOYSTICK_HIDAPI_8BITDO
 
 #endif // SDL_JOYSTICK_HIDAPI
